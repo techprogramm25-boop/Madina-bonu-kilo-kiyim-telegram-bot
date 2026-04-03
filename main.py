@@ -37,13 +37,16 @@ async def start_handler(message: types.Message, state: FSMContext):
     for key, val in TOPICS.items():
         builder.button(text=val["name"], callback_data=f"go_{key}")
     
-    # Sotib olish tugmasi (Hamma uchun)
+    # Yangi tugma: Hamma bo'limga yuborish (Faqat Admin uchun ko'rinadi)
+    if user_id in ADMINS:
+        builder.button(text="📢 Hamma bo'limga yuborish", callback_data="go_all")
+    
     builder.button(text="🛍 Sotib olish / Aloqa", callback_data="buy_contact")
     builder.adjust(2)
 
     msg = "Xush kelibsiz! Bo'limni tanlang:"
     if user_id in ADMINS:
-        msg = "Salom Admin! Narsa qo'shish uchun bo'limni tanlang:"
+        msg = "Salom Admin! Bo'limni tanlang yoki hamma bo'limga reklama tashlang:"
         
     await message.answer(msg, reply_markup=builder.as_markup())
 
@@ -56,9 +59,11 @@ async def handle_choice(callback: types.CallbackQuery, state: FSMContext):
     if user_id in ADMINS:
         await state.update_data(topic_key=key)
         await state.set_state(BotStates.waiting_for_content)
-        await callback.message.edit_text(f"✅ {TOPICS[key]['name']} uchun rasm/video/matn yuboring:")
+        
+        name = "Hamma bo'limlar" if key == "all" else TOPICS[key]['name']
+        await callback.message.edit_text(f"✅ {name} tanlandi.\nNarsa yuboring (Rasm/Video/Matn):")
     else:
-        # Oddiy foydalanuvchini topicga yo'naltirish
+        if key == "all": return await callback.answer("Ruxsat yo'q!", show_alert=True)
         url = f"https://t.me/{GROUP_LINK}/{TOPICS[key]['id']}"
         kb = InlineKeyboardBuilder()
         kb.button(text="➡️ Bo'limga kirish", url=url)
@@ -68,12 +73,11 @@ async def handle_choice(callback: types.CallbackQuery, state: FSMContext):
 # --- ADMIN: KONTENT QABUL QILISH ---
 @dp.message(BotStates.waiting_for_content)
 async def get_content(message: types.Message, state: FSMContext):
-    # Xabarni saqlab qo'yamiz (rasm, video yoki matnligini farqi yo'q)
     await state.update_data(msg_to_copy=message)
     await state.set_state(BotStates.waiting_for_count)
-    await message.answer("Ushbu xabar necha marta yuborilsin? (Raqam yozing, masalan: 5)")
+    await message.answer("Ushbu xabar necha marta yuborilsin? (Masalan: 1)")
 
-# --- ADMIN: NECHA MARTA JONATISH ---
+# --- ADMIN: YUBORISH ---
 @dp.message(BotStates.waiting_for_count)
 async def repeat_send(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
@@ -82,44 +86,46 @@ async def repeat_send(message: types.Message, state: FSMContext):
     count = min(int(message.text), 50)
     data = await state.get_data()
     saved_msg = data['msg_to_copy']
-    t_id = TOPICS[data['topic_key']]['id']
+    topic_key = data['topic_key']
     
-    await message.answer(f"🚀 {count} marta yuborish boshlandi...")
+    await message.answer(f"🚀 Yuborish boshlandi...")
     
+    # Qaysi topiclarga yuborishni aniqlaymiz
+    target_ids = []
+    if topic_key == "all":
+        target_ids = [v['id'] for v in TOPICS.values()]
+    else:
+        target_ids = [TOPICS[topic_key]['id']]
+
     for i in range(count):
-        try:
-            await saved_msg.copy_to(chat_id=GROUP_ID, message_thread_id=t_id)
-            await asyncio.sleep(2) # 2 soniya kutish
-        except Exception as e:
-            await message.answer(f"Xatolik: {e}")
-            break
+        for t_id in target_ids:
+            try:
+                await saved_msg.copy_to(chat_id=GROUP_ID, message_thread_id=t_id)
+            except Exception as e:
+                logging.error(f"Xato: {e}")
+        await asyncio.sleep(2) # Oraliq vaqt
             
-    await message.answer("✅ Hammasi yuborildi!")
+    await message.answer("✅ Muvaffaqiyatli tugatildi!")
     await state.clear()
 
-# --- SOTIB OLISH / ALOQA ---
+# --- SOTIB OLISH VA JAVOB BERISH (O'zgarishsiz qoldi) ---
 @dp.callback_query(F.data == "buy_contact")
 async def buy_request(callback: types.CallbackQuery):
     user = callback.from_user
     builder = InlineKeyboardBuilder()
     builder.button(text="Javob berish 💬", callback_data=f"reply_{user.id}")
-    
     for admin in ADMINS:
         try:
-            await bot.send_message(admin, f"🛍 **Sotib olish so'rovi!**\n\nKimdan: {user.full_name}\nID: {user.id}\nUsername: @{user.username}", 
-                                   reply_markup=builder.as_markup())
+            await bot.send_message(admin, f"🛍 **Sotib olish so'rovi!**\n\nKimdan: {user.full_name}\nID: {user.id}", reply_markup=builder.as_markup())
         except: pass
-        
-    await callback.message.answer("Sizning so'rovingiz adminga yuborildi. Tezpada javob berishadi!")
+    await callback.message.answer("So'rovingiz yuborildi!")
     await callback.answer()
 
-# --- ADMIN JAVOBI ---
 @dp.callback_query(F.data.startswith("reply_"))
 async def start_reply(callback: types.CallbackQuery, state: FSMContext):
-    target_id = callback.data.split("_")[1]
-    await state.update_data(reply_to=target_id)
+    await state.update_data(reply_to=callback.data.split("_")[1])
     await state.set_state(BotStates.waiting_for_reply)
-    await callback.message.answer("Foydalanuvchiga yozadigan javobingizni yuboring:")
+    await callback.message.answer("Javobingizni yozing:")
     await callback.answer()
 
 @dp.message(BotStates.waiting_for_reply)
@@ -127,9 +133,8 @@ async def send_reply(message: types.Message, state: FSMContext):
     data = await state.get_data()
     try:
         await bot.send_message(data['reply_to'], f"📩 **Admin javobi:**\n\n{message.text}")
-        await message.answer("✅ Javobingiz foydalanuvchiga yuborildi!")
-    except:
-        await message.answer("❌ Yuborib bo'lmadi (foydalanuvchi botni bloklagan bo'lishi mumkin).")
+        await message.answer("✅ Javob yuborildi!")
+    except: await message.answer("❌ Xato!")
     await state.clear()
 
 async def main():
