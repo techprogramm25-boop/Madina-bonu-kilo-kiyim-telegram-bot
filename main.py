@@ -22,6 +22,9 @@ class BotStates(StatesGroup):
     waiting_for_custom_name = State()
     waiting_for_custom_link = State()
     waiting_for_count = State()
+    # Muloqot holatlari
+    waiting_for_customer_msg = State() # Mijoz yozishi
+    waiting_for_admin_reply = State()  # Admin javob berishi
 
 TOPICS = {
     "bahor": {"id": 4, "name": "🌸 Bahorgi kiyimlar"},
@@ -30,77 +33,97 @@ TOPICS = {
     "qish": {"id": 2, "name": "❄️ Qishki kiyimlar"}
 }
 
-# --- 1. START VA 9 TA TUGMALI MENYU ---
+# --- 1. START VA MENYU ---
 @dp.message(Command("start"))
 async def start_handler(message: types.Message, state: FSMContext):
     await state.clear()
-    if message.from_user.id not in ADMINS: return
-
+    user_id = message.from_user.id
     builder = InlineKeyboardBuilder()
-    # 1-4: Fasllar
-    for key, val in TOPICS.items():
-        builder.button(text=val["name"], callback_data=f"p_{key}")
-    
-    # 5-8: Qo'shimcha funksiyalar
-    builder.button(text="📢 Custom Reklama", callback_data="p_custom") # 5
-    builder.button(text="🧹 Tozalash", callback_data="clean_now")      # 6
-    builder.button(text="🛍 Aloqa", callback_data="contact")           # 7
-    builder.button(text="⚙️ Sozlamalar", callback_data="settings")      # 8
-    
-    # 9-chi TUGMA: HAMMASIGA BIRDA YUBORISH
-    builder.button(text="📢 Hammasiga birda yuborish", callback_data="p_all") # 9
-    
-    builder.adjust(2)
-    await message.answer("Admin paneli (Jami 9 ta tugma). Tanlang:", reply_markup=builder.as_markup())
 
-# --- 2. REKLAMA TOZALASH ---
-@dp.callback_query(F.data == "clean_now")
-async def clean_group(callback: types.CallbackQuery):
-    await callback.message.answer("🔍 Tozalanmoqda...")
-    deleted = 0
-    async for msg in bot.get_chat_history(GROUP_ID, limit=100):
-        if msg.from_user.id in ADMINS: continue
-        if re.search(URL_PATTERN, (msg.text or "") + (msg.caption or "")):
-            try:
-                await msg.delete()
-                deleted += 1
-            except: pass
-    await callback.message.answer(f"✅ {deleted} ta reklama o'chirildi.")
+    if user_id in ADMINS:
+        # ADMIN MENYUSI (9 ta tugma)
+        for key, val in TOPICS.items():
+            builder.button(text=val["name"], callback_data=f"p_{key}")
+        builder.button(text="📢 Custom Reklama", callback_data="p_custom")
+        builder.button(text="🧹 Tozalash", callback_data="clean_now")
+        builder.button(text="🛍 Aloqa", callback_data="contact")
+        builder.button(text="📊 Statistika", callback_data="stats")
+        builder.button(text="📢 Hammasiga birda", callback_data="p_all")
+        builder.adjust(2)
+        await message.answer("Admin paneli:", reply_markup=builder.as_markup())
+    else:
+        # FOYDALANUVCHI MENYUSI
+        for key, val in TOPICS.items():
+            url = f"https://t.me/MadinaBonuKiloKIyimlar/{val['id']}"
+            builder.button(text=val["name"], url=url)
+        builder.button(text="🛍 Aloqa / Sotib olish", callback_data="customer_support")
+        builder.adjust(2)
+        await message.answer("Xush kelibsiz! Bo'limni tanlang yoki admin bilan bog'laning:", reply_markup=builder.as_markup())
+
+# --- 2. SOTIB OLISH / ALOQA TIZIMI (Mijoz uchun) ---
+@dp.callback_query(F.data == "customer_support")
+@dp.callback_query(F.data.startswith("buy_"))
+async def start_customer_chat(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.waiting_for_customer_msg)
+    await callback.message.answer("📝 Marhamat, qaysi kiyim sizga yoqdi yoki savolingizni yozing. Admin sizga tezda javob beradi!")
     await callback.answer()
 
-# --- 3. YUKLASH TIZIMI ---
+@dp.message(BotStates.waiting_for_customer_msg)
+async def forward_to_admin(message: types.Message, state: FSMContext):
+    kb = InlineKeyboardBuilder().button(text="💬 Javob berish", callback_data=f"rep_{message.from_user.id}")
+    for adm in ADMINS:
+        try:
+            await bot.send_message(adm, f"🛒 **Yangi xabar!**\nKimdan: {message.from_user.full_name}\nID: {message.from_user.id}\n\nXabar: {message.text}", reply_markup=kb.as_markup())
+        except: pass
+    await message.answer("✅ Xabaringiz yuborildi. Admin javobini kuting.")
+    await state.clear()
+
+# --- 3. ADMIN JAVOBI TIZIMI ---
+@dp.callback_query(F.data.startswith("rep_"))
+async def ask_admin_reply(callback: types.CallbackQuery, state: FSMContext):
+    customer_id = callback.data.split("_")[1]
+    await state.update_data(target_id=customer_id)
+    await state.set_state(BotStates.waiting_for_admin_reply)
+    await callback.message.answer(f"👤 Mijozga (ID: {customer_id}) javobingizni yozing:")
+    await callback.answer()
+
+@dp.message(BotStates.waiting_for_admin_reply)
+async def send_reply_to_customer(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    try:
+        await bot.send_message(data['target_id'], f"📩 **Admin javobi:**\n\n{message.text}")
+        await message.answer("✅ Javobingiz mijozga yetib bordi!")
+    except:
+        await message.answer("❌ Javob yuborishda xatolik (Mijoz botni bloklagan bo'lishi mumkin).")
+    await state.clear()
+
+# --- 4. YUKLASH VA REKLAMA (Avvalgi mantiq saqlandi) ---
 @dp.callback_query(F.data.startswith("p_"))
 async def handle_post(callback: types.CallbackQuery, state: FSMContext):
     mode = callback.data.split("_")[1]
     await state.update_data(mode=mode)
-    
     if mode == "custom":
         await state.set_state(BotStates.waiting_for_custom_name)
         await callback.message.edit_text("📝 Tugma NOMINI yozing:")
     else:
-        # p_all yoki p_bahor va hokazo
         await state.set_state(BotStates.waiting_for_content)
-        text = "Hamma bo'limga" if mode == "all" else mode.capitalize()
-        await callback.message.edit_text(f"✅ {text} tanlandi. Xabarni yuboring:")
+        await callback.message.edit_text("✅ Xabarni yuboring:")
     await callback.answer()
 
 @dp.message(BotStates.waiting_for_custom_name)
 async def get_ad_name(message: types.Message, state: FSMContext):
-    await state.update_data(c_name=message.text)
-    await state.set_state(BotStates.waiting_for_custom_link)
-    await message.answer("🔗 Tugma LINKINI yuboring:")
+    await state.update_data(c_name=message.text); await state.set_state(BotStates.waiting_for_custom_link)
+    await message.answer("🔗 Linkni yuboring:")
 
 @dp.message(BotStates.waiting_for_custom_link)
 async def get_ad_link(message: types.Message, state: FSMContext):
-    await state.update_data(c_link=message.text)
-    await state.set_state(BotStates.waiting_for_content)
+    await state.update_data(c_link=message.text); await state.set_state(BotStates.waiting_for_content)
     await message.answer("🖼 Kontentni yuboring:")
 
 @dp.message(BotStates.waiting_for_content)
 async def process_content(message: types.Message, state: FSMContext):
     data = await state.get_data()
     builder = InlineKeyboardBuilder()
-    
     if data['mode'] == "custom":
         builder.button(text=data['c_name'], url=data['c_link'])
     elif message.photo or message.video:
@@ -114,28 +137,28 @@ async def process_content(message: types.Message, state: FSMContext):
 @dp.message(BotStates.waiting_for_count)
 async def final_broadcast(message: types.Message, state: FSMContext):
     if not message.text.isdigit(): return
-    count = int(message.text)
-    data = await state.get_data()
-    
-    # Mode 'all' bo'lsa hamma topicga, 'custom' bo'lsa ham hamma topicga, aks holda bittasiga
-    if data['mode'] in ["all", "custom"]:
-        t_ids = [v['id'] for v in TOPICS.values()]
-    else:
-        t_ids = [TOPICS[data['mode']]['id']]
+    count = int(message.text); data = await state.get_data()
+    t_ids = [v['id'] for v in TOPICS.values()] if data['mode'] in ["all", "custom"] else [TOPICS[data['mode']]['id']]
     
     for _ in range(count):
         for tid in t_ids:
-            try:
-                await data['msg_to_copy'].copy_to(GROUP_ID, message_thread_id=tid, reply_markup=data['markup'])
+            try: await data['msg_to_copy'].copy_to(GROUP_ID, message_thread_id=tid, reply_markup=data['markup'])
             except: pass
         await asyncio.sleep(1)
-    
-    await message.answer("✅ Muvaffaqiyatli yakunlandi!")
-    await state.clear()
+    await message.answer("✅ Yakunlandi!"); await state.clear()
 
-async def main():
-    await dp.start_polling(bot)
+# --- 5. TOZALASH ---
+@dp.callback_query(F.data == "clean_now")
+async def clean_group(callback: types.CallbackQuery):
+    deleted = 0
+    async for msg in bot.get_chat_history(GROUP_ID, limit=100):
+        if msg.from_user.id in ADMINS: continue
+        if re.search(URL_PATTERN, (msg.text or "") + (msg.caption or "")):
+            try: await msg.delete(); deleted += 1
+            except: pass
+    await callback.message.answer(f"✅ {deleted} ta reklama o'chirildi."); await callback.answer()
 
+async def main(): await dp.start_polling(bot)
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     asyncio.run(main())
