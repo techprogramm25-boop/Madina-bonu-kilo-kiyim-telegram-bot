@@ -1,9 +1,9 @@
 import logging
 import asyncio
 import random
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # --- SOZLAMALAR ---
 BOT_TOKEN = "8684928003:AAHdpSFmNwijOijqQCwblUGbcikoPUxiZGo"
@@ -22,54 +22,49 @@ TOPIC_KUZGI = 8
 TOPIC_BARCHA_JAMY = 130
 TOPIC_FORWARDI_ESKI = 137  # Eski guruhdan keladigan narsalar uchun
 
-# Git-da bor bo'lgan start rasmi havolasi (Sizning GitHub rasmingiz to'g'ridan-to'g'ri havolasi)
+# Git-da bor bo'lgan start rasmi havolasi
 START_IMAGE_URL = "https://raw.githubusercontent.com/Yusufxonpro/MadiWay/main/kilo_kiyim_madi.png" 
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
 user_verification_codes = {}
 verified_users = set()
 
-# --- ADMIN PANEL TUGMALARI ---
+# --- ADMIN PANEL TUGMALARI (aiogram 2 uslubida) ---
 def get_admin_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="🌸 Bahorgi kiyimlar", callback_data="admin_cat_4"),
-        types.InlineKeyboardButton(text="☀️ Yozgi kiyimlar", callback_data="admin_cat_6")
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton(text="🌸 Bahorgi kiyimlar", callback_data="admin_cat_4"),
+        InlineKeyboardButton(text="☀️ Yozgi kiyimlar", callback_data="admin_cat_6"),
+        InlineKeyboardButton(text="🍂 Kuzgi kiyimlar", callback_data="admin_cat_8"),
+        InlineKeyboardButton(text="❄️ Qishki kiyimlar", callback_data="admin_cat_2"),
+        InlineKeyboardButton(text="👗 Barcha kiyimlar", callback_data="admin_cat_130"),
+        InlineKeyboardButton(text="📢 Custom Reklama", callback_data="ad_custom"),
+        InlineKeyboardButton(text="🧹 Tozalash", callback_data="clear_data"),
+        InlineKeyboardButton(text="🛍️ Aloqa", callback_data="contact_info"),
+        InlineKeyboardButton(text="📊 Statistika", callback_data="statistika"),
+        InlineKeyboardButton(text="📢 Hammasiga birda", callback_data="ad_all")
     )
-    builder.row(
-        types.InlineKeyboardButton(text="🍂 Kuzgi kiyimlar", callback_data="admin_cat_8"),
-        types.InlineKeyboardButton(text="❄️ Qishki kiyimlar", callback_data="admin_cat_2")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="👗 Barcha kiyimlar", callback_data="admin_cat_130"),
-        types.InlineKeyboardButton(text="📢 Custom Reklama", callback_data="ad_custom")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🧹 Tozalash", callback_data="clear_data"),
-        types.InlineKeyboardButton(text="🛍️ Aloqa", callback_data="contact_info")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="📊 Statistika", callback_data="statistika"),
-        types.InlineKeyboardButton(text="📢 Hammasiga birda", callback_data="ad_all")
-    )
-    return builder.as_markup()
+    return keyboard
 
-# --- MIJOZ PANEL TUGMALARI ---
+# --- MIJOZ PANEL TUGMALARI (aiogram 2 uslubida) ---
 def get_user_keyboard():
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🌸 Bahorgi kiyimlar"), types.KeyboardButton(text="☀️ Yozgi kiyimlar"))
-    builder.row(types.KeyboardButton(text="🍂 Kuzgi kiyimlar"), types.KeyboardButton(text="❄️ Qishki kiyimlar"))
-    builder.row(types.KeyboardButton(text="👗 Barcha kiyimlar jami"), types.KeyboardButton(text="🛍️ Biz bilan aloqa"))
-    return builder.as_markup(resize_keyboard=True)
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    keyboard.add(
+        KeyboardButton(text="🌸 Bahorgi kiyimlar"), KeyboardButton(text="☀️ Yozgi kiyimlar"),
+        KeyboardButton(text="🍂 Kuzgi kiyimlar"), KeyboardButton(text="❄️ Qishki kiyimlar"),
+        KeyboardButton(text="👗 Barcha kiyimlar jami"), KeyboardButton(text="🛍️ Biz bilan aloqa")
+    )
+    return keyboard
 
-# --- START BUYRUG'I (Rasm bilan keladi) ---
-@dp.message(CommandStart())
+# --- START BUYRUG'I ---
+@dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     if message.from_user.id in ADMINS:
-        await message.answer_photo(
+        await bot.send_photo(
+            chat_id=message.chat.id,
             photo=START_IMAGE_URL,
             caption="👋 Assalomu alaykum Admin!\n\nAdmin paneli (Jami 10 ta tugma):",
             reply_markup=get_admin_keyboard()
@@ -80,7 +75,8 @@ async def start_cmd(message: types.Message):
             "Bozordagidan ancha arzon va sifatli Yevropa kiyimlari!\n"
             "O'zingizga kerakli fasl tugmasini bosing 👇"
         )
-        await message.answer_photo(
+        await bot.send_photo(
+            chat_id=message.chat.id,
             photo=START_IMAGE_URL,
             caption=welcome_text,
             reply_markup=get_user_keyboard(),
@@ -88,7 +84,7 @@ async def start_cmd(message: types.Message):
         )
 
 # --- MIJOZ FASL TUGMALARI ---
-@dp.message(F.text.in_({"🌸 Bahorgi kiyimlar", "☀️ Yozgi kiyimlar", "🍂 Kuzgi kiyimlar", "❄️ Qishki kiyimlar", "👗 Barcha kiyimlar jami"}))
+@dp.message_handler(lambda message: message.text in ["🌸 Bahorgi kiyimlar", "☀️ Yozgi kiyimlar", "🍂 Kuzgi kiyimlar", "❄️ Qishki kiyimlar", "👗 Barcha kiyimlar jami"])
 async def show_topic_link(message: types.Message):
     links = {
         "🌸 Bahorgi kiyimlar": (TOPIC_BAHORGI, "Bahorgi kiyimlar bo'limiga o'tish"),
@@ -98,14 +94,16 @@ async def show_topic_link(message: types.Message):
         "👗 Barcha kiyimlar jami": (TOPIC_BARCHA_JAMY, "Barcha kiyimlar jami bo'limiga o'tish")
     }
     topic_id, text_info = links[message.text]
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="👁️ Ko'rish", url=f"https://t.me/MadinaBonuKiloKIyimlar/{topic_id}"))
-    await message.answer(f"👇 Quyidagi tugma orqali {text_info}:", reply_markup=builder.as_markup())
+    
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton(text="👁️ Ko'rish", url=f"https://t.me/MadinaBonuKiloKIyimlar/{topic_id}"))
+    
+    await message.answer(f"👇 Quyidagi tugma orqali {text_info}:", reply_markup=keyboard)
 
-# --- ESKI GURUHNI REKLAMADAN TOZALASH VA MASHINA FORWARDI ---
-@dp.message(F.chat.id == ESKI_GURUH_ID)
+# --- ESKI GURUHNI REKLAMADAN TOZALASH VA FORWARD ---
+@dp.message_handler(chat_id=ESKI_GURUH_ID, content_types=types.ContentTypes.ANY)
 async def eski_guruh_handler(message: types.Message):
-    # 1. Antispam: Reklama havolalarini aniqlash va o'chirish
+    # 1. Antispam: Reklama linklarini tozalash
     if message.text and ("t.me/" in message.text or "http" in message.text or "@" in message.text):
         if message.from_user.id not in ADMINS:
             try:
@@ -114,34 +112,28 @@ async def eski_guruh_handler(message: types.Message):
             except Exception:
                 pass
 
-    # 2. Avtomatik Forward: Har qanday xabarni yangi guruhning 137-topiciga yo'naltirish
+    # 2. Avtomatik Forward (Yangi guruhning 137-topiciga)
     try:
         await bot.forward_message(
             chat_id=YANGI_GURUH_ID,
             from_chat_id=ESKI_GURUH_ID,
-            message_id=message.message_id,
-            message_thread_id=TOPIC_FORWARDI_ESKI
+            message_id=message.message_id
+            # DIQQAT: aiogram 2 da superguruh ichidagi aniq topic_id ga to'g'ridan-to'g'ri forward qilish cheklangan bo'lishi mumkin. 
+            # Agar xabar umumiy guruhga tushsa, yangi guruh havolasini ishlating.
         )
     except Exception as e:
-        logging.error(f"Forward qilishda xatolik: {e}")
+        logging.error(f"Forward xatoligi: {e}")
 
-# --- ESKI GURUHGA ODAM QO'SHILSA, YANGISIGA HAM INVAIT QILISH ---
-@dp.message(F.chat.id == ESKI_GURUH_ID, F.new_chat_members)
+# --- ESKI GURUHGA ODAM QO'SHILSA YANGISIGA TAKLIF QILISH ---
+@dp.message_handler(chat_id=ESKI_GURUH_ID, content_types=types.ContentTypes.NEW_CHAT_MEMBERS)
 async def avto_invite_handler(message: types.Message):
     for member in message.new_chat_members:
         if not member.is_bot:
-            try:
-                # Maxfiyligi ruxsat bergan odamlarni yangi guruhga qo'shishga urinib ko'rish
-                await bot.approve_chat_join_request(chat_id=YANGI_GURUH_ID, user_id=member.id)
-                # Yoki to'g'ridan-to'g'ri qo'shish buyrug'i (agar botda to'liq huquq bo'lsa)
-                await bot.add_chat_members(chat_id=YANGI_GURUH_ID, user_ids=[member.id])
-            except Exception:
-                # Agar foydalanuvchi nastroykasida ruxsat bermasa, bot unga taklif havolasini guruhda ko'rsatadi
-                invite_text = f"🎁 @{member.username} yangi guruhimizga ham qo'shiling: https://t.me/MadinaBonuKiloKIyimlar"
-                await message.answer(invite_text)
+            invite_text = f"🎁 @{member.username} yangi guruhimizga ham qo'shiling: https://t.me/MadinaBonuKiloKIyimlar"
+            await message.answer(invite_text)
 
 # --- YANGI GURUH ICHIDAGI VERIFIKATSIYA (KOD TIZIMI) ---
-@dp.message(F.chat.id == YANGI_GURUH_ID)
+@dp.message_handler(chat_id=YANGI_GURUH_ID, content_types=types.ContentTypes.TEXT)
 async def yangi_guruh_handler(message: types.Message):
     user_id = message.from_user.id
     if user_id in ADMINS or user_id in verified_users:
@@ -159,7 +151,9 @@ async def yangi_guruh_handler(message: types.Message):
             pass
         return
 
-    if message.message_thread_id == TOPIC_XABAR_YOZISH:
+    # Guruhda 'message_thread_id' (Topic) ni tekshirish
+    topic_id = message.to_python().get('message_thread_id', 1)
+    if topic_id == TOPIC_XABAR_YOZISH:
         code = random.randint(1000, 9999)
         user_verification_codes[user_id] = code
         warn_text = f"⚠️ **Diqqat @{message.from_user.username}!**\nBot kodini kiriting: `{code}`"
@@ -174,8 +168,5 @@ async def yangi_guruh_handler(message: types.Message):
         except Exception:
             pass
 
-async def main():
-    await dp.start_polling(bot)
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
